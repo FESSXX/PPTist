@@ -499,8 +499,12 @@ export interface TableCellStyle {
   color?: string
   backcolor?: string
   fontsize?: string
+  fontsizePt?: number
   fontname?: string
   align?: TextAlign
+  valign?: 'top' | 'middle' | 'bottom'
+  margin?: [number, number, number, number]
+  lineHeight?: number
 }
 
 
@@ -567,6 +571,7 @@ export interface PPTTableElement extends PPTBaseElement {
   theme?: TableTheme
   colWidths: number[]
   cellMinHeight: number
+  rowHeights?: number[]
   data: TableCell[][]
 }
 

@@ -13,7 +13,10 @@
             @selectAll="({ slides, theme }) => { insertAllTemplates({ slides, theme }); presetLayoutPopoverVisible = false }"
           />
         </template>
+        <!-- 演示场景隐藏模板下拉入口 -->
+        <!--
         <div class="select-btn"><i-icon-park-outline:down /></div>
+        -->
       </Popover>
     </div>
 

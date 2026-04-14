@@ -25,6 +25,10 @@ export interface SlidesState {
   slideIndex: number
   viewportSize: number
   viewportRatio: number
+  sourceSlideSize: {
+    width: number
+    height: number
+  } | null
   templates: SlideTemplate[]
 }
 
@@ -52,6 +56,7 @@ export const useSlidesStore = defineStore('slides', {
     slideIndex: 0, // 当前页面索引
     viewportSize: 1000, // 可视区域宽度基数
     viewportRatio: 0.5625, // 可视区域比例，默认16:9
+    sourceSlideSize: null, // 源PPT物理页面尺寸（单位：pt）
     templates: [
       { name: '山河映红', id: 'template_1', cover: './imgs/template_1.webp', origin: '官方制作' },
       { name: '都市蓝调', id: 'template_2', cover: './imgs/template_2.webp', origin: '官方制作' },
@@ -127,6 +132,11 @@ export const useSlidesStore = defineStore('slides', {
   
     setViewportRatio(viewportRatio: number) {
       this.viewportRatio = viewportRatio
+      this.sourceSlideSize = null
+    },
+
+    setSourceSlideSize(size: SlidesState['sourceSlideSize']) {
+      this.sourceSlideSize = size
     },
   
     setSlides(slides: Slide[], themeProps?: Partial<SlideTheme>) {

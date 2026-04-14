@@ -11,7 +11,6 @@
         <Divider type="vertical" style="height: 20px;" />
         <Popover class="more-icon" trigger="click" v-model:value="moreVisible" :offset="10">
           <template #content>
-            <PopoverMenuItem class="popover-menu-item" center @click="toggleNotesPanel(); moreVisible = false"><i-icon-park-outline:comment class="icon" />批注面板</PopoverMenuItem>
             <PopoverMenuItem class="popover-menu-item" center @click="toggleSelectPanel(); moreVisible = false"><i-icon-park-outline:move-one class="icon" />选择窗格</PopoverMenuItem>
             <PopoverMenuItem class="popover-menu-item" center @click="toggleSraechPanel(); moreVisible = false"><i-icon-park-outline:search class="icon" />查找替换</PopoverMenuItem>
           </template>
@@ -19,9 +18,6 @@
             <i-icon-park-outline:more />
           </span>
         </Popover>
-        <span class="handler-item" :class="{ 'active': showNotesPanel }" v-tooltip="'批注面板'" @click="toggleNotesPanel()">
-          <i-icon-park-outline:comment />
-        </span>
         <span class="handler-item" :class="{ 'active': showSelectPanel }" v-tooltip="'选择窗格'" @click="toggleSelectPanel()">
           <i-icon-park-outline:move-one />
         </span>
@@ -101,9 +97,12 @@
           <i-icon-park-outline:insert-table class="icon" /> <span class="text">表格</span>
         </div>
       </Popover>
+      <!-- 演示场景隐藏公式入口 -->
+      <!--
       <div class="insert-handler-item" v-tooltip="'插入公式'" @click="latexEditorVisible = true">
         <i-icon-park-outline:formula class="icon" /> <span class="text">公式</span>
       </div>
+      -->
       <Popover trigger="click" v-model:value="mediaInputVisible" :offset="10">
         <template #content>
           <MediaInput 
@@ -116,9 +115,12 @@
           <i-icon-park-outline:video-two class="icon" /> <span class="text">音视频</span>
         </div>
       </Popover>
+      <!-- 演示场景隐藏符号入口 -->
+      <!--
       <div class="insert-handler-item" :class="{ 'active': showSymbolPanel }" v-tooltip="'插入符号'" @click="toggleSymbolPanel()">
         <i-icon-park-outline:symbol class="icon" /> <span class="text">符号</span>
       </div>
+      -->
     </div>
 
     <div class="right-handler">
@@ -145,15 +147,6 @@
       </span>
     </div>
 
-    <Modal
-      v-model:visible="latexEditorVisible" 
-      :width="880"
-    >
-      <LaTeXEditor 
-        @close="latexEditorVisible = false"
-        @update="data => { createLatexElement(data); latexEditorVisible = false }"
-      />
-    </Modal>
   </div>
 </template>
 
@@ -173,15 +166,13 @@ import LinePool from './LinePool.vue'
 import ChartPool from './ChartPool.vue'
 import TableGenerator from './TableGenerator.vue'
 import MediaInput from './MediaInput.vue'
-import LaTeXEditor from '@/components/LaTeXEditor/index.vue'
 import FileInput from '@/components/FileInput.vue'
-import Modal from '@/components/Modal.vue'
 import Divider from '@/components/Divider.vue'
 import Popover from '@/components/Popover.vue'
 import PopoverMenuItem from '@/components/PopoverMenuItem.vue'
 
 const mainStore = useMainStore()
-const { creatingElement, creatingCustomShape, showSelectPanel, showSearchPanel, showNotesPanel, showSymbolPanel } = storeToRefs(mainStore)
+const { creatingElement, creatingCustomShape, showSelectPanel, showSearchPanel } = storeToRefs(mainStore)
 const { canUndo, canRedo } = storeToRefs(useSnapshotStore())
 
 const { redo, undo } = useHistorySnapshot()
@@ -205,7 +196,6 @@ const {
   createImageElement,
   createChartElement,
   createTableElement,
-  createLatexElement,
   createVideoElement,
   createAudioElement,
 } = useCreateElement()
@@ -221,7 +211,6 @@ const linePoolVisible = ref(false)
 const chartPoolVisible = ref(false)
 const tableGeneratorVisible = ref(false)
 const mediaInputVisible = ref(false)
-const latexEditorVisible = ref(false)
 const textTypeSelectVisible = ref(false)
 const shapeMenuVisible = ref(false)
 const imageMenuVisible = ref(false)
@@ -266,16 +255,6 @@ const toggleSelectPanel = () => {
 // 打开搜索替换面板
 const toggleSraechPanel = () => {
   mainStore.setSearchPanelState(!showSearchPanel.value)
-}
-
-// 打开批注面板
-const toggleNotesPanel = () => {
-  mainStore.setNotesPanelState(!showNotesPanel.value)
-}
-
-// 打开符号面板
-const toggleSymbolPanel = () => {
-  mainStore.setSymbolPanelState(!showSymbolPanel.value)
 }
 
 // 打开图库面板

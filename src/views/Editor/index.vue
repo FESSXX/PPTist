@@ -5,12 +5,7 @@
       <Thumbnails class="layout-content-left" />
       <div class="layout-content-center">
         <CanvasTool class="center-top" />
-        <Canvas class="center-body" :style="{ height: `calc(100% - ${remarkHeight + 40}px)` }" />
-        <Remark
-          class="center-bottom" 
-          v-model:height="remarkHeight" 
-          :style="{ height: `${remarkHeight}px` }"
-        />
+        <Canvas class="center-body" :style="{ height: 'calc(100% - 40px)' }" />
       </div>
       <Toolbar class="layout-content-right" />
     </div>
@@ -18,9 +13,7 @@
 
   <SelectPanel v-if="showSelectPanel" />
   <SearchPanel v-if="showSearchPanel" />
-  <NotesPanel v-if="showNotesPanel" />
   <MarkupPanel v-if="showMarkupPanel" />
-  <SymbolPanel v-if="showSymbolPanel" />
   <ImageLibPanel v-if="showImageLibPanel" />
 
   <Modal
@@ -45,7 +38,6 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMainStore } from '@/store'
 import useGlobalHotkey from '@/hooks/useGlobalHotkey'
@@ -56,12 +48,9 @@ import Canvas from './Canvas/index.vue'
 import CanvasTool from './CanvasTool/index.vue'
 import Thumbnails from './Thumbnails/index.vue'
 import Toolbar from './Toolbar/index.vue'
-import Remark from './Remark/index.vue'
 import ExportDialog from './ExportDialog/index.vue'
 import SelectPanel from './SelectPanel.vue'
 import SearchPanel from './SearchPanel.vue'
-import NotesPanel from './NotesPanel.vue'
-import SymbolPanel from './SymbolPanel.vue'
 import MarkupPanel from './MarkupPanel.vue'
 import ImageLibPanel from './ImageLibPanel.vue'
 import AIPPTDialog from './AIPPTDialog.vue'
@@ -72,8 +61,6 @@ const {
   dialogForExport,
   showSelectPanel,
   showSearchPanel,
-  showNotesPanel,
-  showSymbolPanel,
   showMarkupPanel,
   showImageLibPanel,
   showAIPPTDialog,
@@ -81,8 +68,6 @@ const {
 
 const closeExportDialog = () => mainStore.setDialogForExport('')
 const closeAIPPTDialog = () => mainStore.setAIPPTDialogState(false)
-
-const remarkHeight = ref(40)
 
 useGlobalHotkey()
 usePasteEvent()

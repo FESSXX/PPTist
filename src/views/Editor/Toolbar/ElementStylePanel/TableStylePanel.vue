@@ -300,7 +300,9 @@ const updateTextAttrs = (textAttrProp: Partial<TableCellStyle>) => {
     for (let j = 0; j < data[i].length; j++) {
       if (!selectedCells.value.length || selectedCells.value.includes(`${i}_${j}`)) {
         const style = data[i][j].style || {}
-        data[i][j].style = { ...style, ...textAttrProp }
+        const nextStyle = { ...style, ...textAttrProp }
+        if (textAttrProp.fontsize) nextStyle.fontsizePt = parseFloat(textAttrProp.fontsize)
+        data[i][j].style = nextStyle
       }
     }
   }

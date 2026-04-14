@@ -28,3 +28,8 @@ coverage
 *.sw?
 
 *.tsbuildinfo
+.helloagents/
+skills/helloagents
+AGENTS.md
+CLAUDE.md
+.gemini/GEMINI.md

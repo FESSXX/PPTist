@@ -24,18 +24,59 @@ interface ExportImageConfig {
 
 export default () => {
   const slidesStore = useSlidesStore()
-  const { slides, theme, viewportRatio, title, viewportSize } = storeToRefs(slidesStore)
+  const { slides, theme, viewportRatio, title, viewportSize, sourceSlideSize } = storeToRefs(slidesStore)
 
   const defaultFontSize = 16
 
+  const exportSlideWidthInch = computed(() => {
+    if (sourceSlideSize.value?.width) return sourceSlideSize.value.width / 72
+    return 10
+  })
+  const exportSlideHeightInch = computed(() => {
+    if (sourceSlideSize.value?.height) return sourceSlideSize.value.height / 72
+    return exportSlideWidthInch.value * viewportRatio.value
+  })
   const ratioPx2Inch = computed(() => {
-    return 96 * (viewportSize.value / 960)
+    return viewportSize.value / exportSlideWidthInch.value
   })
   const ratioPx2Pt = computed(() => {
-    return 96 / 72 * (viewportSize.value / 960)
+    return ratioPx2Inch.value / 72
   })
 
+  const normalizeTableCoord = (value: number) => {
+    return Math.abs(value) < 0.01 ? 0 : value
+  }
+
+  const normalizeTableValign = (valign?: 'top' | 'middle' | 'bottom') => {
+    return valign || 'middle'
+  }
+
+  const normalizeTableMargin = (margin?: [number, number, number, number]) => {
+    if (!margin) return [0, 0, 0, 0] as [number, number, number, number]
+    return [
+      margin[1] / ratioPx2Inch.value,
+      margin[2] / ratioPx2Inch.value,
+      margin[3] / ratioPx2Inch.value,
+      margin[0] / ratioPx2Inch.value,
+    ] as [number, number, number, number]
+  }
+
+  const getTableFontSize = (fontsize?: string, fontsizePt?: number) => {
+    if (fontsizePt) return fontsizePt
+    if (fontsize) return parseInt(fontsize) / ratioPx2Pt.value
+    return 14
+  }
+
   const exporting = ref(false)
+
+  const applyPptxLayout = (pptx: pptxgen) => {
+    pptx.defineLayout({
+      name: 'PPTIST_CUSTOM',
+      width: +exportSlideWidthInch.value.toFixed(6),
+      height: +exportSlideHeightInch.value.toFixed(6),
+    })
+    pptx.layout = 'PPTIST_CUSTOM'
+  }
 
   // 导出图片
   const exportImage = (domRef: HTMLElement, format: string, quality: number, ignoreWebfont = true) => {
@@ -69,6 +110,7 @@ export default () => {
     
     setTimeout(() => {
       const pptx = new pptxgen()
+      applyPptxLayout(pptx)
 
       const config: ExportImageConfig = {
         quality: 1,
@@ -469,18 +511,7 @@ export default () => {
   const exportPPTX = (_slides: Slide[], masterOverwrite: boolean, ignoreMedia: boolean) => {
     exporting.value = true
     const pptx = new pptxgen()
-
-    if (viewportRatio.value === 0.625) pptx.layout = 'LAYOUT_16x10'
-    else if (viewportRatio.value === 0.75) pptx.layout = 'LAYOUT_4x3'
-    else if (viewportRatio.value === 0.70710678) {
-      pptx.defineLayout({ name: 'A3', width: 10, height: 7.0710678 })
-      pptx.layout = 'A3'
-    }
-    else if (viewportRatio.value === 1.41421356) {
-      pptx.defineLayout({ name: 'A3_V', width: 10, height: 14.1421356 })
-      pptx.layout = 'A3_V'
-    }
-    else pptx.layout = 'LAYOUT_16x9'
+    applyPptxLayout(pptx)
 
     if (masterOverwrite) {
       const { color: bgColor, alpha: bgAlpha } = formatColor(theme.value.backgroundColor)
@@ -599,19 +630,20 @@ export default () => {
             const [start, end] = el.clip.range
             const [startX, startY] = start
             const [endX, endY] = end
+            const cropWidthRatio = (endX - startX) / 100
+            const cropHeightRatio = (endY - startY) / 100
+            const originW = cropWidthRatio > 0 ? el.width / cropWidthRatio : el.width
+            const originH = cropHeightRatio > 0 ? el.height / cropHeightRatio : el.height
 
-            const originW = el.width / ((endX - startX) / ratioPx2Inch.value)
-            const originH = el.height / ((endY - startY) / ratioPx2Inch.value)
-
-            options.w = originW / ratioPx2Inch.value
-            options.h = originH / ratioPx2Inch.value
+            options.w = el.width / ratioPx2Inch.value
+            options.h = el.height / ratioPx2Inch.value
 
             options.sizing = {
               type: 'crop',
-              x: startX / ratioPx2Inch.value * originW / ratioPx2Inch.value,
-              y: startY / ratioPx2Inch.value * originH / ratioPx2Inch.value,
-              w: (endX - startX) / ratioPx2Inch.value * originW / ratioPx2Inch.value,
-              h: (endY - startY) / ratioPx2Inch.value * originH / ratioPx2Inch.value,
+              x: originW * startX / 100 / ratioPx2Inch.value,
+              y: originH * startY / 100 / ratioPx2Inch.value,
+              w: el.width / ratioPx2Inch.value,
+              h: el.height / ratioPx2Inch.value,
             }
           }
 
@@ -846,6 +878,9 @@ export default () => {
         }
 
         else if (el.type === 'table') {
+          const tableLeft = normalizeTableCoord(el.left)
+          const tableTop = normalizeTableCoord(el.top)
+
           const hiddenCells = []
           for (let i = 0; i < el.data.length; i++) {
             const rowData = el.data[i]
@@ -883,9 +918,10 @@ export default () => {
                 italic: cell.style?.em || false,
                 underline: { style: cell.style?.underline ? 'sng' : 'none' },
                 align: cell.style?.align || 'left',
-                valign: 'middle',
+                valign: normalizeTableValign(cell.style?.valign),
                 fontFace: cell.style?.fontname || '微软雅黑',
-                fontSize: (cell.style?.fontsize ? parseInt(cell.style?.fontsize) : 14) / ratioPx2Pt.value,
+                fontSize: getTableFontSize(cell.style?.fontsize, cell.style?.fontsizePt),
+                margin: normalizeTableMargin(cell.style?.margin),
               }
               if (theme && themeColor) {
                 let c: FormatColor
@@ -916,11 +952,19 @@ export default () => {
           }
 
           const options: pptxgen.TableProps = {
-            x: el.left / ratioPx2Inch.value,
-            y: el.top / ratioPx2Inch.value,
+            x: tableLeft / ratioPx2Inch.value,
+            y: tableTop / ratioPx2Inch.value,
             w: el.width / ratioPx2Inch.value,
             h: el.height / ratioPx2Inch.value,
             colW: el.colWidths.map(item => el.width * item / ratioPx2Inch.value),
+          }
+          if (el.rowHeights?.length) {
+            const rowHeights = el.rowHeights.map(item => item / ratioPx2Inch.value)
+            const totalRowHeight = rowHeights.reduce((sum, item) => sum + item, 0)
+            if (totalRowHeight > 0) {
+              options.rowH = rowHeights
+              options.h = totalRowHeight
+            }
           }
           if (el.theme) options.fill = { color: '#ffffff' }
           if (el.outline.width && el.outline.color) {

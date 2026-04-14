@@ -19,10 +19,8 @@ import { useMainStore } from '@/store'
 import type { DialogForExportTypes } from '@/types/export'
 
 import ExportImage from './ExportImage.vue'
-import ExportJSON from './ExportJSON.vue'
 import ExportPDF from './ExportPDF.vue'
 import ExportPPTX from './ExportPPTX.vue'
-import ExportSpecificFile from './ExportSpecificFile.vue'
 import Tabs from '@/components/Tabs.vue'
 
 interface TabItem {
@@ -36,22 +34,21 @@ const { dialogForExport } = storeToRefs(mainStore)
 const setDialogForExport = mainStore.setDialogForExport
 
 const tabs: TabItem[] = [
-  { key: 'pptist', label: '导出 PPTIST 文件' },
   { key: 'pptx', label: '导出 PPTX' },
   { key: 'image', label: '导出图片' },
-  { key: 'json', label: '导出 JSON' },
   { key: 'pdf', label: '打印 / 导出 PDF' },
 ]
 
+const dialogMap = {
+  'image': ExportImage,
+  'pdf': ExportPDF,
+  'pptx': ExportPPTX,
+}
+
+const isSupportedDialog = (type: DialogForExportTypes): type is keyof typeof dialogMap => type in dialogMap
+
 const currentDialogComponent = computed<unknown>(() => {
-  const dialogMap = {
-    'image': ExportImage,
-    'json': ExportJSON,
-    'pdf': ExportPDF,
-    'pptx': ExportPPTX,
-    'pptist': ExportSpecificFile,
-  }
-  if (dialogForExport.value) return dialogMap[dialogForExport.value] || null
+  if (isSupportedDialog(dialogForExport.value)) return dialogMap[dialogForExport.value]
   return null
 })
 </script>

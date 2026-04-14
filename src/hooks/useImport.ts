@@ -12,6 +12,7 @@ import useSlideHandler from '@/hooks/useSlideHandler'
 import useHistorySnapshot from './useHistorySnapshot'
 import message from '@/utils/message'
 import { getSvgPathRange } from '@/utils/svgPathParser'
+import { getTableCellLayoutMap, type PPTSlideTableLayouts } from '@/utils/pptTableMeta'
 import type {
   Slide,
   TableCellStyle,
@@ -207,12 +208,14 @@ export default () => {
           slidesStore.setSlides(slides, (theme || {}))
           if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
           if (width && width !== viewportSize) slidesStore.setViewportSize(width)
+          slidesStore.setSourceSlideSize(null)
           addHistorySnapshot()
         }
         else if (isEmptySlide.value) {
           slidesStore.setSlides(slides, (theme || {}))
           if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
           if (width && width !== viewportSize) slidesStore.setViewportSize(width)
+          slidesStore.setSourceSlideSize(null)
           addHistorySnapshot()
         }
         else addSlidesFromData(slides)
@@ -239,12 +242,14 @@ export default () => {
           slidesStore.setSlides(slides, (theme || {}))
           if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
           if (width && width !== viewportSize) slidesStore.setViewportSize(width)
+          slidesStore.setSourceSlideSize(null)
           addHistorySnapshot()
         }
         else if (isEmptySlide.value) {
           slidesStore.setSlides(slides, (theme || {}))
           if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
           if (width && width !== viewportSize) slidesStore.setViewportSize(width)
+          slidesStore.setSourceSlideSize(null)
           addHistorySnapshot()
         }
         else addSlidesFromData(slides)
@@ -473,10 +478,19 @@ export default () => {
       if (fixedViewport) ratio = 1000 / width
       else slidesStore.setViewportSize(width * ratio)
 
+      let tableLayoutMap: PPTSlideTableLayouts[] = []
+      try {
+        tableLayoutMap = await getTableCellLayoutMap(file, ratio)
+      }
+      catch (_error) {
+        tableLayoutMap = []
+      }
+
       slidesStore.setTheme({ themeColors: json.themeColors })
 
       const slides: Slide[] = []
-      for (const item of json.slides) {
+      for (let slideIndex = 0; slideIndex < json.slides.length; slideIndex++) {
+        const item = json.slides[slideIndex]
         const { type, value } = item.fill
         let background: SlideBackground
         if (type === 'image') {
@@ -520,6 +534,8 @@ export default () => {
           background,
           remark: item.note || '',
         }
+
+        let slideTableIndex = 0
 
         const parseElements = (elements: Element[]) => {
           const sortedElements = elements.sort((a, b) => a.order - b.order)
@@ -881,6 +897,8 @@ export default () => {
             else if (el.type === 'table') {
               const row = el.data.length
               const col = el.data[0].length
+              const tableCellLayout = tableLayoutMap[slideIndex]?.[slideTableIndex] || []
+              slideTableIndex++
   
               const style: TableCellStyle = {
                 fontname: theme.value.fontName,
@@ -891,14 +909,18 @@ export default () => {
                 const rowCells: TableCell[] = []
                 for (let j = 0; j < col; j++) {
                   const cellData = el.data[i][j]
+                  const cellLayout = tableCellLayout[i]?.[j]
 
                   let textDiv: HTMLDivElement | null = document.createElement('div')
                   textDiv.innerHTML = cellData.text
                   const p = textDiv.querySelector('p')
                   const align = p?.style.textAlign || 'left'
+                  const lineHeightText = p?.style.lineHeight || ''
+                  const lineHeight = lineHeightText ? parseFloat(lineHeightText) : undefined
 
                   const span = textDiv.querySelector('span')
                   const fontsize = span?.style.fontSize ? (parseInt(span?.style.fontSize) * ratio).toFixed(1) + 'px' : ''
+                  const fontsizePt = span?.style.fontSize ? parseFloat(span.style.fontSize) : undefined
                   const fontname = span?.style.fontFamily || ''
                   const color = span?.style.color || cellData.fontColor
 
@@ -911,10 +933,14 @@ export default () => {
                       ...style,
                       align: ['left', 'right', 'center'].includes(align) ? (align as 'left' | 'right' | 'center') : 'left',
                       fontsize,
+                      fontsizePt,
                       fontname,
                       color,
                       bold: cellData.fontBold,
                       backcolor: cellData.fillColor,
+                      valign: cellLayout?.valign,
+                      margin: cellLayout?.margin,
+                      lineHeight,
                     },
                   })
                   textDiv = null
@@ -954,6 +980,7 @@ export default () => {
                   color: borderColor,
                 },
                 cellMinHeight: el.rowHeights[0] ? el.rowHeights[0] * ratio : 36,
+                rowHeights: el.rowHeights.map(item => item * ratio),
               })
             }
             else if (el.type === 'chart') {
@@ -1089,11 +1116,13 @@ export default () => {
         slidesStore.updateSlideIndex(0)
         slidesStore.setSlides(slides)
         if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
+        slidesStore.setSourceSlideSize({ width, height })
         addHistorySnapshot()
       }
       else if (isEmptySlide.value) {
         slidesStore.setSlides(slides)
         if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
+        slidesStore.setSourceSlideSize({ width, height })
         addHistorySnapshot()
       }
       else addSlidesFromData(slides)

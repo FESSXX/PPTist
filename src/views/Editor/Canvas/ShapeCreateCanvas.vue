@@ -9,8 +9,8 @@
     <svg overflow="visible">
 			<path
         :d="path" 
-        stroke="#d14424" 
-        :fill="closed ? 'rgba(226, 83, 77, 0.15)' : 'none'" 
+        stroke="#1D4991" 
+        :fill="closed ? 'rgba(29, 73, 145, 0.15)' : 'none'" 
         stroke-width="2" 
       ></path>
 		</svg>

@@ -53,7 +53,10 @@
           <Divider :margin="10" />
           <div class="statement">注：本站仅作测试/演示，不提供任何形式的服务</div>
         </template>
+        <!-- 演示场景隐藏左上角主菜单入口 -->
+        <!--
         <div class="menu-item"><i-icon-park-outline:hamburger-button class="icon" /></div>
+        -->
       </Popover>
 
       <div class="title">
@@ -86,15 +89,57 @@
           <div class="arrow-btn"><i-icon-park-outline:down class="arrow" /></div>
         </Popover>
       </div>
-      <div class="menu-item" v-tooltip="'AI生成PPT'" @click="openAIPPTDialog(); mainMenuVisible = false">
-        <span class="text ai">AI</span>
-      </div>
+      <Popover trigger="click" placement="bottom" v-model:value="importMenuVisible">
+        <template #content>
+          <div class="import-popover">
+            <div class="import-section">
+              <div class="import-label">导入文件</div>
+              <div class="import-grid">
+                <FileInput class="import-block" accept="application/vnd.openxmlformats-officedocument.presentationml.presentation" @change="files => {
+                  importPPTXFile(files)
+                  importMenuVisible = false
+                }">
+                  <span class="icon"><i-custom:file-ppt /></span>
+                  <span class="label">PPTX</span>
+                  <span class="sub-label">（仅供测试）</span>
+                </FileInput>
+                <FileInput class="import-block" accept=".json" @change="files => {
+                  importJSON(files)
+                  importMenuVisible = false
+                }">
+                  <span class="icon"><i-custom:file-jpg /></span>
+                  <span class="label">JSON</span>
+                  <span class="sub-label">（仅供测试）</span>
+                </FileInput>
+                <FileInput class="import-block" accept=".pptist" @change="files => {
+                  importSpecificFile(files)
+                  importMenuVisible = false
+                }">
+                  <span class="icon"><i-custom:file-pptist /></span>
+                  <span class="label">PPTIST</span>
+                  <span class="sub-label">（专属格式）</span>
+                </FileInput>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div class="menu-item" v-tooltip="'导入'">
+          <i-icon-park-outline:upload class="icon" />
+        </div>
+      </Popover>
       <div class="menu-item" v-tooltip="'导出'" @click="setDialogForExport('pptx')">
         <i-icon-park-outline:download class="icon" />
       </div>
+      <!--
+      <div class="menu-item" v-tooltip="'AI生成PPT'" @click="openAIPPTDialog(); mainMenuVisible = false">
+        <span class="text ai">AI</span>
+      </div>
+      -->
+      <!--
       <a class="github-link" v-tooltip="'Copyright © 2020-PRESENT pipipi-pikachu'" href="https://github.com/pipipi-pikachu/PPTist" target="_blank">
         <div class="menu-item"><i-icon-park-outline:github class="icon" /></div>
       </a>
+      -->
     </div>
 
     <Drawer
@@ -136,6 +181,7 @@ const { importSpecificFile, importPPTXFile, importJSON, exporting } = useImport(
 const { resetSlides } = useSlideHandler()
 
 const mainMenuVisible = ref(false)
+const importMenuVisible = ref(false)
 const hotkeyDrawerVisible = ref(false)
 const editingTitle = ref(false)
 const titleValue = ref('')
@@ -231,6 +277,9 @@ const openAIPPTDialog = () => {
   font-style: italic;
 }
 .main-menu {
+  width: 300px;
+}
+.import-popover {
   width: 300px;
 }
 .ai-menu {

@@ -117,193 +117,8 @@
       <div class="canvas-size">画布尺寸：{{  viewportSize  }} × {{ toFixed(viewportSize * viewportRatio) }}</div>
     </div>
 
-    <Divider />
-
-    <div class="title">
-      <span>全局主题</span>
-      <span class="more" @click="moreThemeConfigsVisible = !moreThemeConfigsVisible">
-        <span class="text">更多</span>
-        <i-icon-park-outline:down v-if="moreThemeConfigsVisible" />
-        <i-icon-park-outline:right v-else />
-      </span>
-    </div>
-    <div class="row">
-      <div style="width: 40%;">字体：</div>
-      <Select
-        style="width: 60%;"
-        :value="theme.fontName"
-        search
-        searchLabel="搜索字体"
-        autofocus
-        @update:value="value => updateTheme({ fontName: value as string })"
-        :options="FONTS"
-      />
-    </div>
-    <div class="row">
-      <div style="width: 40%;">字体颜色：</div>
-      <Popover trigger="click" style="width: 60%;">
-        <template #content>
-          <ColorPicker
-            :modelValue="theme.fontColor"
-            @update:modelValue="value => updateTheme({ fontColor: value })"
-          />
-        </template>
-        <ColorButton :color="theme.fontColor" />
-      </Popover>
-    </div>
-    <div class="row">
-      <div style="width: 40%;">背景颜色：</div>
-      <Popover trigger="click" style="width: 60%;">
-        <template #content>
-          <ColorPicker
-            :modelValue="theme.backgroundColor"
-            @update:modelValue="value => updateTheme({ backgroundColor: value })"
-          />
-        </template>
-        <ColorButton :color="theme.backgroundColor" />
-      </Popover>
-    </div>
-    <div class="row">
-      <div style="width: 40%;">主题色：</div>
-      <ColorListButton style="width: 60%;" :colors="theme.themeColors" @click="themeColorsSettingVisible = true" />
-    </div>
-    
-    <template v-if="moreThemeConfigsVisible">
-      <div class="row">
-        <div style="width: 40%;">边框样式：</div>
-        <SelectCustom style="width: 60%;">
-          <template #options>
-            <div class="option" v-for="item in lineStyleOptions" :key="item" @click="updateTheme({ outline: { ...theme.outline, style: item } })">
-              <SVGLine :type="item" />
-            </div>
-          </template>
-          <template #label>
-            <SVGLine :type="theme.outline.style" />
-          </template>
-        </SelectCustom>
-      </div>
-      <div class="row">
-        <div style="width: 40%;">边框颜色：</div>
-        <Popover trigger="click" style="width: 60%;">
-          <template #content>
-            <ColorPicker
-              :modelValue="theme.outline.color"
-              @update:modelValue="value => updateTheme({ outline: { ...theme.outline, color: value } })"
-            />
-          </template>
-          <ColorButton :color="theme.outline.color || '#000'" />
-        </Popover>
-      </div>
-      <div class="row">
-        <div style="width: 40%;">边框粗细：</div>
-        <NumberInput 
-          :value="theme.outline.width || 0" 
-          @update:value="value => updateTheme({ outline: { ...theme.outline, width: value } })" 
-          style="width: 60%;" 
-        />
-      </div>
-      <div class="row" style="height: 30px;">
-        <div style="width: 40%;">水平阴影：</div>
-        <Slider 
-          style="width: 60%;"
-          :min="-10" 
-          :max="10" 
-          :step="1" 
-          :value="theme.shadow.h" 
-          @update:value="value => updateTheme({ shadow: { ...theme.shadow, h: value as number } })"
-        />
-      </div>
-      <div class="row" style="height: 30px;">
-        <div style="width: 40%;">垂直阴影：</div>
-        <Slider
-          style="width: 60%;"
-          :min="-10"
-          :max="10"
-          :step="1"
-          :value="theme.shadow.v"
-          @update:value="value => updateTheme({ shadow: { ...theme.shadow, v: value as number } })"
-        />
-      </div>
-      <div class="row" style="height: 30px;">
-        <div style="width: 40%;">模糊距离：</div>
-        <Slider
-          style="width: 60%;"
-          :min="1"
-          :max="20"
-          :step="1"
-          :value="theme.shadow.blur"
-          @update:value="value => updateTheme({ shadow: { ...theme.shadow, blur: value as number } })"
-        />
-      </div>
-      <div class="row">
-        <div style="width: 40%;">阴影颜色：</div>
-        <Popover trigger="click" style="width: 60%;">
-          <template #content>
-            <ColorPicker
-              :modelValue="theme.shadow.color"
-              @update:modelValue="value => updateTheme({ shadow: { ...theme.shadow, color: value } })"
-            />
-          </template>
-          <ColorButton :color="theme.shadow.color" />
-        </Popover>
-      </div>
-    </template>
-
-    <div class="row">
-      <Button style="flex: 1;" @click="applyThemeToAllSlides(moreThemeConfigsVisible)"><i-icon-park-outline:check /> 应用主题到全部</Button>
-    </div>
-
-    <div class="row">
-      <Button style="flex: 1;" @click="applyFontToAllSlides(theme.fontName)"><i-icon-park-outline:check /> 全局统一字体</Button>
-    </div>
-
-    <div class="row">
-      <Button style="flex: 1;" @click="themeStylesExtractVisible = true"><i-icon-park-outline:platte /> 从幻灯片提取主题</Button>
-    </div>
-
-    <Divider />
-
-    <div class="title">预置主题</div>
-    <div class="theme-list">
-      <div 
-        class="theme-item" 
-        v-for="(item, index) in PRESET_THEMES" 
-        :key="index"
-        :style="{
-          backgroundColor: item.background,
-          fontFamily: item.fontname,
-        }"
-      >
-        <div class="theme-item-content">
-          <div class="text" :style="{ color: item.fontColor }">文字 Aa</div>
-          <div class="colors">
-            <div class="color-block" v-for="(color, index) in item.colors" :key="index" :style="{ backgroundColor: color}"></div>
-          </div>
-
-          <div class="btns">
-            <Button type="primary" size="small" @click="applyPresetTheme(item)">设置</Button>
-            <Button type="primary" size="small" style="margin-top: 3px;" @click="applyPresetTheme(item, true)">设置并应用</Button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- 演示场景隐藏全局主题与预置主题区域 -->
   </div>
-
-  <Modal
-    v-model:visible="themeStylesExtractVisible" 
-    :width="320"
-    @closed="themeStylesExtractVisible = false"
-  >
-    <ThemeStylesExtract @close="themeStylesExtractVisible = false" />
-  </Modal>
-
-  <Modal
-    v-model:visible="themeColorsSettingVisible" 
-    :width="310"
-    @closed="themeColorsSettingVisible = false"
-  >
-    <ThemeColorsSetting @close="themeColorsSettingVisible = false" />
-  </Modal>
 </template>
 
 <script lang="ts" setup>
@@ -315,22 +130,13 @@ import type {
   GradientType,
   SlideBackground,
   SlideBackgroundType,
-  SlideTheme,
   SlideBackgroundImage,
   SlideBackgroundImageSize,
-  LineStyleType,
 } from '@/types/slides'
-import { PRESET_THEMES } from '@/configs/theme'
-import { FONTS } from '@/configs/font'
 import useHistorySnapshot from '@/hooks/useHistorySnapshot'
-import useSlideTheme from '@/hooks/useSlideTheme'
 import { getImageDataURL } from '@/utils/image'
 
-import ThemeStylesExtract from './ThemeStylesExtract.vue'
-import ThemeColorsSetting from './ThemeColorsSetting.vue'
-import SVGLine from '../common/SVGLine.vue'
 import ColorButton from '@/components/ColorButton.vue'
-import ColorListButton from '@/components/ColorListButton.vue'
 import FileInput from '@/components/FileInput.vue'
 import ColorPicker from '@/components/ColorPicker/index.vue'
 import Divider from '@/components/Divider.vue'
@@ -338,19 +144,12 @@ import Slider from '@/components/Slider.vue'
 import Button from '@/components/Button.vue'
 import Select from '@/components/Select.vue'
 import Popover from '@/components/Popover.vue'
-import SelectCustom from '@/components/SelectCustom.vue'
-import NumberInput from '@/components/NumberInput.vue'
-import Modal from '@/components/Modal.vue'
 import GradientBar from '@/components/GradientBar.vue'
 
 const slidesStore = useSlidesStore()
-const { slides, currentSlide, slideIndex, viewportRatio, viewportSize, theme } = storeToRefs(slidesStore)
+const { slides, currentSlide, slideIndex, viewportRatio, viewportSize } = storeToRefs(slidesStore)
 
-const moreThemeConfigsVisible = ref(false)
-const themeStylesExtractVisible = ref(false)
-const themeColorsSettingVisible = ref(false)
 const currentGradientIndex = ref(0)
-const lineStyleOptions = ref<LineStyleType[]>(['solid', 'dashed', 'dotted'])
 
 const background = computed(() => {
   if (!currentSlide.value.background) {
@@ -363,11 +162,6 @@ const background = computed(() => {
 })
 
 const { addHistorySnapshot } = useHistorySnapshot()
-const {
-  applyPresetTheme,
-  applyThemeToAllSlides,
-  applyFontToAllSlides,
-} = useSlideTheme()
 
 watch(slideIndex, () => {
   currentGradientIndex.value = 0
@@ -455,11 +249,6 @@ const applyBackgroundAllSlide = () => {
   addHistorySnapshot()
 }
 
-// 设置主题
-const updateTheme = (themeProps: Partial<SlideTheme>) => {
-  slidesStore.setTheme(themeProps)
-}
-
 // 设置画布尺寸（宽高比例）
 const updateViewportRatio = (value: number) => {
   slidesStore.setViewportRatio(value)
@@ -532,70 +321,4 @@ const toFixed = (num: number) => {
   text-align: center;
 }
 
-.theme-list {
-  @include flex-grid-layout();
-}
-.theme-item {
-  @include flex-grid-layout-children(2, 48%);
-
-  padding-bottom: 27%;
-  border-radius: $borderRadius;
-  position: relative;
-  cursor: pointer;
-
-  .theme-item-content {
-    @include absolute-0();
-
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 8px;
-    border: 1px solid $borderColor;
-    border-radius: $borderRadius;
-  }
-
-  .text {
-    font-size: 15px;
-  }
-  .colors {
-    display: flex;
-    margin-top: 6px;
-  }
-  .color-block {
-    width: 12px;
-    height: 12px;
-    margin-right: 2px;
-  }
-
-  &:hover .btns {
-    opacity: 1;
-  }
-
-  .btns {
-    @include absolute-0();
-
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    display: flex;
-    background-color: rgba($color: #000, $alpha: .25);
-    opacity: 0;
-    transition: opacity $transitionDelay;
-  }
-}
-.option {
-  height: 32px;
-  padding: 0 5px;
-  border-radius: $borderRadius;
-
-  &:not(.selected):hover {
-    background-color: rgba($color: $themeColor, $alpha: .05);
-    cursor: pointer;
-  }
-
-  &.selected {
-    color: $themeColor;
-    font-weight: 700;
-  }
-}
 </style>
