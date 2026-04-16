@@ -13,6 +13,8 @@ import useHistorySnapshot from './useHistorySnapshot'
 import message from '@/utils/message'
 import { getSvgPathRange } from '@/utils/svgPathParser'
 import { getTableCellLayoutMap, type PPTSlideTableLayouts } from '@/utils/pptTableMeta'
+import { normalizePPTXImportBuffer } from '@/utils/pptxImportNormalizer'
+import { getSlideBackgroundOverrideMap } from '@/utils/pptSlideBackgroundMeta'
 import type {
   Slide,
   TableCellStyle,
@@ -180,6 +182,24 @@ const getParagraphMetrics = (html: string, ratio: number) => {
   return {
     lineHeight,
     margin: margin ? +(margin * ratio).toFixed(1) : null,
+  }
+}
+
+const parsePPTXBuffer = async (buffer: ArrayBuffer) => {
+  const parseOptions = {
+    imageMode: 'base64' as const,
+    videoMode: 'blob' as const,
+    audioMode: 'blob' as const,
+  }
+
+  try {
+    return await parse(buffer, parseOptions)
+  }
+  catch (error) {
+    const normalized = await normalizePPTXImportBuffer(buffer)
+    if (!normalized.changed) throw error
+
+    return await parse(normalized.buffer, parseOptions)
   }
 }
 
@@ -436,15 +456,19 @@ export default () => {
   }
 
   // 导入PPTX文件
-  const importPPTXFile = (files: FileList | File[], options?: { cover?: boolean; fixedViewport?: boolean }) => {
+  const importPPTXFile = (
+    files: FileList | File[],
+    options?: { cover?: boolean; fixedViewport?: boolean; addSnapshot?: boolean },
+  ) => {
     const defaultOptions = {
       cover: false,
-      fixedViewport: false, 
+      fixedViewport: false,
+      addSnapshot: true,
     }
-    const { cover, fixedViewport } = { ...defaultOptions, ...options }
+    const { cover, fixedViewport, addSnapshot } = { ...defaultOptions, ...options }
 
     const file = files[0]
-    if (!file) return
+    if (!file) return Promise.resolve()
 
     exporting.value = true
 
@@ -454,505 +478,514 @@ export default () => {
     }
     
     const reader = new FileReader()
-    reader.onload = async e => {
-      let json = null
-      try {
-        json = await parse(e.target!.result as ArrayBuffer, {
-          imageMode: 'base64',
-          videoMode: 'blob',
-          audioMode: 'blob',
-        })
-      }
-      catch {
-        exporting.value = false
-        message.error('无法正确读取 / 解析该文件')
-        return
-      }
+    return new Promise<void>((resolve, reject) => {
+      reader.onload = async e => {
+        let json = null
+        try {
+          json = await parsePPTXBuffer(e.target!.result as ArrayBuffer)
+        }
+        catch (error) {
+          exporting.value = false
+          message.error('无法正确读取 / 解析该文件')
+          reject(error)
+          return
+        }
 
-      let ratio = 96 / 72
-      const width = json.size.width
-      const height = json.size.height
+        let ratio = 96 / 72
+        const width = json.size.width
+        const height = json.size.height
 
-      const aspectRatio = getAspectRatio(width, height)
-      
-      if (fixedViewport) ratio = 1000 / width
-      else slidesStore.setViewportSize(width * ratio)
+        const aspectRatio = getAspectRatio(width, height)
 
-      let tableLayoutMap: PPTSlideTableLayouts[] = []
-      try {
-        tableLayoutMap = await getTableCellLayoutMap(file, ratio)
-      }
-      catch (_error) {
-        tableLayoutMap = []
-      }
+        if (fixedViewport) ratio = 1000 / width
+        else slidesStore.setViewportSize(width * ratio)
 
-      slidesStore.setTheme({ themeColors: json.themeColors })
+        let tableLayoutMap: PPTSlideTableLayouts[] = []
+        try {
+          tableLayoutMap = await getTableCellLayoutMap(file, ratio)
+        }
+        catch (_error) {
+          tableLayoutMap = []
+        }
 
-      const slides: Slide[] = []
-      for (let slideIndex = 0; slideIndex < json.slides.length; slideIndex++) {
-        const item = json.slides[slideIndex]
-        const { type, value } = item.fill
-        let background: SlideBackground
-        if (type === 'image') {
-          background = {
-            type: 'image',
-            image: {
-              src: value.base64,
-              size: 'cover',
-            },
+        let slideBackgroundOverrides: (SlideBackground | null)[] = []
+        try {
+          slideBackgroundOverrides = await getSlideBackgroundOverrideMap(file)
+        }
+        catch (_error) {
+          slideBackgroundOverrides = []
+        }
+
+        slidesStore.setTheme({ themeColors: json.themeColors })
+
+        const slides: Slide[] = []
+        for (let slideIndex = 0; slideIndex < json.slides.length; slideIndex++) {
+          const item = json.slides[slideIndex]
+          const { type, value } = item.fill
+          let background: SlideBackground
+          if (type === 'image') {
+            background = {
+              type: 'image',
+              image: {
+                src: value.base64,
+                size: 'cover',
+              },
+            }
           }
-        }
-        else if (type === 'gradient') {
-          background = {
-            type: 'gradient',
-            gradient: {
-              type: value.path === 'line' ? 'linear' : 'radial',
-              colors: value.colors.map(item => ({
-                ...item,
-                pos: parseInt(item.pos),
-              })),
-              rotate: value.rot,
-            },
+          else if (type === 'gradient') {
+            background = {
+              type: 'gradient',
+              gradient: {
+                type: value.path === 'line' ? 'linear' : 'radial',
+                colors: value.colors.map(item => ({
+                  ...item,
+                  pos: parseInt(item.pos),
+                })),
+                rotate: value.rot,
+              },
+            }
           }
-        }
-        else if (type === 'pattern') {
-          background = {
-            type: 'solid',
-            color: '#fff',
+          else if (type === 'pattern') {
+            background = {
+              type: 'solid',
+              color: '#fff',
+            }
           }
-        }
-        else {
-          background = {
-            type: 'solid',
-            color: value || '#fff',
+          else {
+            background = {
+              type: 'solid',
+              color: value || '#fff',
+            }
           }
-        }
 
-        const slide: Slide = {
-          id: nanoid(10),
-          elements: [],
-          background,
-          remark: item.note || '',
-        }
+          const backgroundOverride = slideBackgroundOverrides[slideIndex]
+          if (backgroundOverride) background = backgroundOverride
 
-        let slideTableIndex = 0
+          const slide: Slide = {
+            id: nanoid(10),
+            elements: [],
+            background,
+            remark: item.note || '',
+          }
 
-        const parseElements = (elements: Element[]) => {
-          const sortedElements = elements.sort((a, b) => a.order - b.order)
+          let slideTableIndex = 0
 
-          for (const el of sortedElements) {
-            const originWidth = el.width || 1
-            const originHeight = el.height || 1
-            const originLeft = el.left
-            const originTop = el.top
+          const parseElements = (elements: Element[]) => {
+            const sortedElements = elements.sort((a, b) => a.order - b.order)
 
-            el.width = el.width * ratio
-            el.height = el.height * ratio
-            el.left = el.left * ratio
-            el.top = el.top * ratio
+            for (const el of sortedElements) {
+              const originWidth = el.width || 1
+              const originHeight = el.height || 1
+              const originLeft = el.left
+              const originTop = el.top
+
+              el.width = el.width * ratio
+              el.height = el.height * ratio
+              el.left = el.left * ratio
+              el.top = el.top * ratio
   
-            if (el.type === 'text') {
-              if (el.autoFit && el.autoFit.type === 'text') {
-                const fontScale = ratio * (el.autoFit.fontScale || 100) / 100
-                const metrics = getParagraphMetrics(el.content, fontScale)
-                const shapeEl: PPTShapeElement = {
-                  type: 'shape',
-                  id: nanoid(10),
-                  width: el.width,
-                  height: el.height,
-                  left: el.left,
-                  top: el.top,
-                  rotate: el.rotate,
-                  viewBox: [200, 200],
-                  path: 'M 0 0 L 200 0 L 200 200 L 0 200 Z',
-                  fill: el.fill?.type === 'color' ? el.fill.value : '',
-                  fixedRatio: false,
-                  outline: {
-                    color: el.borderColor,
-                    width: +(el.borderWidth * ratio).toFixed(2),
-                    style: el.borderType,
-                  },
-                  text: {
-                    content: convertTextContent(el.content, fontScale),
-                    defaultFontName: theme.value.fontName,
-                    defaultColor: theme.value.fontColor,
-                    align: shapeVAlignMap[el.vAlign] || 'middle',
-                    lineHeight: 1,
-                  },
-                }
-                if (el.link) shapeEl.link = { type: 'web', target: el.link }
-                if (metrics.lineHeight) shapeEl.text!.lineHeight = metrics.lineHeight
-                if (metrics.margin) shapeEl.text!.paragraphSpace = metrics.margin
-                slide.elements.push(shapeEl)
-              }
-              else {
-                const metrics = getParagraphMetrics(el.content, ratio)
-                const textEl: PPTTextElement = {
-                  type: 'text',
-                  id: nanoid(10),
-                  width: el.width,
-                  height: el.height,
-                  left: el.left,
-                  top: el.top,
-                  rotate: el.rotate,
-                  defaultFontName: theme.value.fontName,
-                  defaultColor: theme.value.fontColor,
-                  content: convertTextContent(el.content, ratio),
-                  lineHeight: 1,
-                  outline: {
-                    color: el.borderColor,
-                    width: +(el.borderWidth * ratio).toFixed(2),
-                    style: el.borderType,
-                  },
-                  fill: el.fill?.type === 'color' ? el.fill.value : '',
-                  vertical: el.isVertical,
-                }
-                if (el.shadow) {
-                  textEl.shadow = {
-                    h: el.shadow.h * ratio,
-                    v: el.shadow.v * ratio,
-                    blur: el.shadow.blur * ratio,
-                    color: el.shadow.color,
+              if (el.type === 'text') {
+                if (el.autoFit && el.autoFit.type === 'text') {
+                  const fontScale = ratio * (el.autoFit.fontScale || 100) / 100
+                  const metrics = getParagraphMetrics(el.content, fontScale)
+                  const shapeEl: PPTShapeElement = {
+                    type: 'shape',
+                    id: nanoid(10),
+                    width: el.width,
+                    height: el.height,
+                    left: el.left,
+                    top: el.top,
+                    rotate: el.rotate,
+                    viewBox: [200, 200],
+                    path: 'M 0 0 L 200 0 L 200 200 L 0 200 Z',
+                    fill: el.fill?.type === 'color' ? el.fill.value : '',
+                    fixedRatio: false,
+                    outline: {
+                      color: el.borderColor,
+                      width: +(el.borderWidth * ratio).toFixed(2),
+                      style: el.borderType,
+                    },
+                    text: {
+                      content: convertTextContent(el.content, fontScale),
+                      defaultFontName: theme.value.fontName,
+                      defaultColor: theme.value.fontColor,
+                      align: shapeVAlignMap[el.vAlign] || 'middle',
+                      lineHeight: 1,
+                    },
                   }
+                  if (el.link) shapeEl.link = { type: 'web', target: el.link }
+                  if (metrics.lineHeight) shapeEl.text!.lineHeight = metrics.lineHeight
+                  if (metrics.margin) shapeEl.text!.paragraphSpace = metrics.margin
+                  slide.elements.push(shapeEl)
                 }
-                if (el.link) textEl.link = { type: 'web', target: el.link }
-                if (metrics.lineHeight) textEl.lineHeight = metrics.lineHeight
-                if (metrics.margin) textEl.paragraphSpace = metrics.margin
-                slide.elements.push(textEl)
-              }
-            }
-            else if (el.type === 'image') {
-              const element: PPTImageElement = {
-                type: 'image',
-                id: nanoid(10),
-                src: el.base64,
-                width: el.width,
-                height: el.height,
-                left: el.left,
-                top: el.top,
-                fixedRatio: true,
-                rotate: el.rotate,
-                flipH: el.isFlipH,
-                flipV: el.isFlipV,
-              }
-              if (el.borderWidth) {
-                element.outline = {
-                  color: el.borderColor,
-                  width: +(el.borderWidth * ratio).toFixed(2),
-                  style: el.borderType,
-                }
-              }
-              const clipShapeTypes = ['rect', 'roundRect', 'ellipse', 'triangle', 'rhombus', 'pentagon', 'hexagon', 'heptagon', 'octagon', 'parallelogram', 'trapezoid']
-              let geom = el.geom || 'rect'
-              if (geom.indexOf('custom:') !== -1) geom = geom.replace('custom:', '')
-              if (!clipShapeTypes.includes(geom)) geom = 'rect'
-
-              if (el.rect) {
-                element.clip = {
-                  shape: geom,
-                  range: [
-                    [
-                      el.rect.l || 0,
-                      el.rect.t || 0,
-                    ],
-                    [
-                      100 - (el.rect.r || 0),
-                      100 - (el.rect.b || 0),
-                    ],
-                  ]
+                else {
+                  const metrics = getParagraphMetrics(el.content, ratio)
+                  const textEl: PPTTextElement = {
+                    type: 'text',
+                    id: nanoid(10),
+                    width: el.width,
+                    height: el.height,
+                    left: el.left,
+                    top: el.top,
+                    rotate: el.rotate,
+                    defaultFontName: theme.value.fontName,
+                    defaultColor: theme.value.fontColor,
+                    content: convertTextContent(el.content, ratio),
+                    lineHeight: 1,
+                    outline: {
+                      color: el.borderColor,
+                      width: +(el.borderWidth * ratio).toFixed(2),
+                      style: el.borderType,
+                    },
+                    fill: el.fill?.type === 'color' ? el.fill.value : '',
+                    vertical: el.isVertical,
+                  }
+                  if (el.shadow) {
+                    textEl.shadow = {
+                      h: el.shadow.h * ratio,
+                      v: el.shadow.v * ratio,
+                      blur: el.shadow.blur * ratio,
+                      color: el.shadow.color,
+                    }
+                  }
+                  if (el.link) textEl.link = { type: 'web', target: el.link }
+                  if (metrics.lineHeight) textEl.lineHeight = metrics.lineHeight
+                  if (metrics.margin) textEl.paragraphSpace = metrics.margin
+                  slide.elements.push(textEl)
                 }
               }
-              else if (el.geom) {
-                element.clip = {
-                  shape: geom,
-                  range: [[0, 0], [100, 100]]
-                }
-              }
-
-              if (el.link) element.link = { type: 'web', target: el.link }
-              slide.elements.push(element)
-            }
-            else if (el.type === 'math') {
-              slide.elements.push({
-                type: 'image',
-                id: nanoid(10),
-                src: el.picBase64,
-                width: el.width,
-                height: el.height,
-                left: el.left,
-                top: el.top,
-                fixedRatio: true,
-                rotate: 0,
-              })
-            }
-            else if (el.type === 'audio' && el.blob) {
-              slide.elements.push({
-                type: 'audio',
-                id: nanoid(10),
-                src: el.blob,
-                width: el.width,
-                height: el.height,
-                left: el.left,
-                top: el.top,
-                rotate: 0,
-                fixedRatio: false,
-                color: theme.value.themeColors[0],
-                loop: false,
-                autoplay: false,
-              })
-            }
-            else if (el.type === 'video' && el.blob) {
-              slide.elements.push({
-                type: 'video',
-                id: nanoid(10),
-                src: el.blob,
-                width: el.width,
-                height: el.height,
-                left: el.left,
-                top: el.top,
-                rotate: 0,
-                autoplay: false,
-              })
-            }
-            else if (el.type === 'shape') {
-              if (el.shapType === 'line' || /straightConnector/.test(el.shapType) || /bentConnector/.test(el.shapType) || /curvedConnector/.test(el.shapType)) {
-                const lineElement = parseLineElement(el, ratio)
-                slide.elements.push(lineElement)
-              }
-              else {
-                const shape = shapeList.find(item => item.pptxShapeType === el.shapType)
-
-                const gradient: Gradient | undefined = el.fill?.type === 'gradient' ? {
-                  type: el.fill.value.path === 'line' ? 'linear' : 'radial',
-                  colors: el.fill.value.colors.map(item => ({
-                    ...item,
-                    pos: parseInt(item.pos),
-                  })),
-                  rotate: el.fill.value.rot,
-                } : undefined
-
-                const pattern: string | undefined = el.fill?.type === 'image' ? el.fill.value.base64 : undefined
-
-                const fill = el.fill?.type === 'color' ? el.fill.value : ''
-
-                const metrics = getParagraphMetrics(el.content, ratio)
-                
-                const element: PPTShapeElement = {
-                  type: 'shape',
+              else if (el.type === 'image') {
+                const element: PPTImageElement = {
+                  type: 'image',
                   id: nanoid(10),
+                  src: el.base64,
                   width: el.width,
                   height: el.height,
                   left: el.left,
                   top: el.top,
-                  viewBox: [200, 200],
-                  path: 'M 0 0 L 200 0 L 200 200 L 0 200 Z',
-                  fill,
-                  gradient,
-                  pattern,
-                  fixedRatio: false,
+                  fixedRatio: true,
                   rotate: el.rotate,
-                  outline: {
-                    color: el.borderColor,
-                    width: +(el.borderWidth * ratio).toFixed(2),
-                    style: el.borderType,
-                  },
-                  text: {
-                    content: convertTextContent(el.content, ratio),
-                    defaultFontName: theme.value.fontName,
-                    defaultColor: theme.value.fontColor,
-                    align: shapeVAlignMap[el.vAlign] || 'middle',
-                  },
                   flipH: el.isFlipH,
                   flipV: el.isFlipV,
                 }
+                if (el.borderWidth) {
+                  element.outline = {
+                    color: el.borderColor,
+                    width: +(el.borderWidth * ratio).toFixed(2),
+                    style: el.borderType,
+                  }
+                }
+                const clipShapeTypes = ['rect', 'roundRect', 'ellipse', 'triangle', 'rhombus', 'pentagon', 'hexagon', 'heptagon', 'octagon', 'parallelogram', 'trapezoid']
+                let geom = el.geom || 'rect'
+                if (geom.indexOf('custom:') !== -1) geom = geom.replace('custom:', '')
+                if (!clipShapeTypes.includes(geom)) geom = 'rect'
+
+                if (el.rect) {
+                  element.clip = {
+                    shape: geom,
+                    range: [
+                      [
+                        el.rect.l || 0,
+                        el.rect.t || 0,
+                      ],
+                      [
+                        100 - (el.rect.r || 0),
+                        100 - (el.rect.b || 0),
+                      ],
+                    ]
+                  }
+                }
+                else if (el.geom) {
+                  element.clip = {
+                    shape: geom,
+                    range: [[0, 0], [100, 100]]
+                  }
+                }
+
                 if (el.link) element.link = { type: 'web', target: el.link }
-                if (metrics.lineHeight) element.text!.lineHeight = metrics.lineHeight
-                if (metrics.margin) element.text!.paragraphSpace = metrics.margin
-
-                if (el.shadow) {
-                  element.shadow = {
-                    h: el.shadow.h * ratio,
-                    v: el.shadow.v * ratio,
-                    blur: el.shadow.blur * ratio,
-                    color: el.shadow.color,
-                  }
-                }
-    
-                if (shape) {
-                  element.path = shape.path
-                  element.viewBox = shape.viewBox
-    
-                  if (shape.pathFormula) {
-                    element.pathFormula = shape.pathFormula
-                    element.viewBox = [el.width, el.height]
-    
-                    const pathFormula = SHAPE_PATH_FORMULAS[shape.pathFormula]
-                    if ('editable' in pathFormula && pathFormula.editable) {
-                      let keypointValues = pathFormula.defaultValue
-                      if (el.keypoints) {
-                        let keypoint = 0
-                        if (el.shapType === 'roundRect') {
-                          const val = el.keypoints.adj === undefined ? 0.334 : el.keypoints.adj
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'snip1Rect') {
-                          const val = el.keypoints.adj === undefined ? 0.334 : el.keypoints.adj
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'snip2SameRect') {
-                          const val = el.keypoints.adj1 === undefined ? 0.334 : el.keypoints.adj1
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'snip2DiagRect') {
-                          const val = el.keypoints.adj2 === undefined ? 0.334 : el.keypoints.adj2
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'snipRoundRect') {
-                          const val1 = el.keypoints.adj1 === undefined ? 0.334 : el.keypoints.adj1
-                          const val2 = el.keypoints.adj2 === undefined ? 0.334 : el.keypoints.adj2
-                          keypoint = ((val1 + val2) / 2) * 0.5
-                        }
-                        if (el.shapType === 'round1Rect') {
-                          const val = el.keypoints.adj === undefined ? 0.334 : el.keypoints.adj
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'round2SameRect') {
-                          const val = el.keypoints.adj1 === undefined ? 0.334 : el.keypoints.adj1
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'round2DiagRect') {
-                          const val = el.keypoints.adj1 === undefined ? 0.334 : el.keypoints.adj1
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'triangle') {
-                          const val = el.keypoints.adj === undefined ? 1 : el.keypoints.adj
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'trapezoid') {
-                          const val = el.keypoints.adj === undefined ? 0.5 : el.keypoints.adj
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'frame') {
-                          const val = el.keypoints.adj1 === undefined ? 0.25 : el.keypoints.adj1
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'corner') {
-                          const val1 = el.keypoints.adj1 === undefined ? 1 : el.keypoints.adj1
-                          const val2 = el.keypoints.adj2 === undefined ? 1 : el.keypoints.adj2
-                          keypoint = ((val1 + val2) / 2) * 0.5
-                        }
-                        if (el.shapType === 'diagStripe') {
-                          const val = el.keypoints.adj === undefined ? 1 : el.keypoints.adj
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'donut') {
-                          const val = el.keypoints.adj === undefined ? 0.5 : el.keypoints.adj
-                          keypoint = val * 0.5
-                        }
-                        if (el.shapType === 'plus') {
-                          const val = el.keypoints.adj === undefined ? 0.5 : el.keypoints.adj
-                          keypoint = 1 - val
-                        }
-                        if (pathFormula.range && keypoint < pathFormula.range[0][0]) keypoint = pathFormula.range[0][0]
-                        if (pathFormula.range && keypoint > pathFormula.range[0][1]) keypoint = pathFormula.range[0][1]
-                        keypointValues = [keypoint]
-                      }
-                      element.path = pathFormula.formula(el.width, el.height, keypointValues)
-                      element.keypoints = keypointValues
-                    }
-                    else element.path = pathFormula.formula(el.width, el.height)
-                  }
-                }
-                else if (el.path && el.path.indexOf('NaN') === -1) {
-                  const { maxX, maxY } = getSvgPathRange(el.path)
-                  element.path = el.path
-                  if ((maxX / maxY) > (originWidth / originHeight)) {
-                    element.viewBox = [maxX, maxX * originHeight / originWidth]
-                  }
-                  else {
-                    element.viewBox = [maxY * originWidth / originHeight, maxY]
-                  }
-                }
-                if (el.shapType === 'custom') {
-                  if (el.path!.indexOf('NaN') !== -1) {
-                    if (element.width === 0) element.width = 0.1
-                    if (element.height === 0) element.height = 0.1
-                    element.path = el.path!.replace(/NaN/g, '0')
-                  }
-                  else {
-                    element.path = el.path!
-                  }
-                  const { maxX, maxY } = getSvgPathRange(element.path)
-                  if ((maxX / maxY) > (originWidth / originHeight)) {
-                    element.viewBox = [maxX, maxX * originHeight / originWidth]
-                  }
-                  else {
-                    element.viewBox = [maxY * originWidth / originHeight, maxY]
-                  }
-                }
-    
-                if (element.path && element.viewBox[0] && element.viewBox[1]) slide.elements.push(element)
+                slide.elements.push(element)
               }
-            }
-            else if (el.type === 'table') {
-              const row = el.data.length
-              const col = el.data[0].length
-              const tableCellLayout = tableLayoutMap[slideIndex]?.[slideTableIndex] || []
-              slideTableIndex++
-  
-              const style: TableCellStyle = {
-                fontname: theme.value.fontName,
-                color: theme.value.fontColor,
+              else if (el.type === 'math') {
+                slide.elements.push({
+                  type: 'image',
+                  id: nanoid(10),
+                  src: el.picBase64,
+                  width: el.width,
+                  height: el.height,
+                  left: el.left,
+                  top: el.top,
+                  fixedRatio: true,
+                  rotate: 0,
+                })
               }
-              const data: TableCell[][] = []
-              for (let i = 0; i < row; i++) {
-                const rowCells: TableCell[] = []
-                for (let j = 0; j < col; j++) {
-                  const cellData = el.data[i][j]
-                  const cellLayout = tableCellLayout[i]?.[j]
+              else if (el.type === 'audio' && el.blob) {
+                slide.elements.push({
+                  type: 'audio',
+                  id: nanoid(10),
+                  src: el.blob,
+                  width: el.width,
+                  height: el.height,
+                  left: el.left,
+                  top: el.top,
+                  rotate: 0,
+                  fixedRatio: false,
+                  color: theme.value.themeColors[0],
+                  loop: false,
+                  autoplay: false,
+                })
+              }
+              else if (el.type === 'video' && el.blob) {
+                slide.elements.push({
+                  type: 'video',
+                  id: nanoid(10),
+                  src: el.blob,
+                  width: el.width,
+                  height: el.height,
+                  left: el.left,
+                  top: el.top,
+                  rotate: 0,
+                  autoplay: false,
+                })
+              }
+              else if (el.type === 'shape') {
+                if (el.shapType === 'line' || /straightConnector/.test(el.shapType) || /bentConnector/.test(el.shapType) || /curvedConnector/.test(el.shapType)) {
+                  const lineElement = parseLineElement(el, ratio)
+                  slide.elements.push(lineElement)
+                }
+                else {
+                  const shape = shapeList.find(item => item.pptxShapeType === el.shapType)
 
-                  let textDiv: HTMLDivElement | null = document.createElement('div')
-                  textDiv.innerHTML = cellData.text
-                  const p = textDiv.querySelector('p')
-                  const align = p?.style.textAlign || 'left'
-                  const lineHeightText = p?.style.lineHeight || ''
-                  const lineHeight = lineHeightText ? parseFloat(lineHeightText) : undefined
+                  const gradient: Gradient | undefined = el.fill?.type === 'gradient' ? {
+                    type: el.fill.value.path === 'line' ? 'linear' : 'radial',
+                    colors: el.fill.value.colors.map(item => ({
+                      ...item,
+                      pos: parseInt(item.pos),
+                    })),
+                    rotate: el.fill.value.rot,
+                  } : undefined
 
-                  const span = textDiv.querySelector('span')
-                  const fontsize = span?.style.fontSize ? (parseInt(span?.style.fontSize) * ratio).toFixed(1) + 'px' : ''
-                  const fontsizePt = span?.style.fontSize ? parseFloat(span.style.fontSize) : undefined
-                  const fontname = span?.style.fontFamily || ''
-                  const color = span?.style.color || cellData.fontColor
+                  const pattern: string | undefined = el.fill?.type === 'image' ? el.fill.value.base64 : undefined
 
-                  rowCells.push({
+                  const fill = el.fill?.type === 'color' ? el.fill.value : ''
+
+                  const metrics = getParagraphMetrics(el.content, ratio)
+                
+                  const element: PPTShapeElement = {
+                    type: 'shape',
                     id: nanoid(10),
-                    colspan: cellData.colSpan || 1,
-                    rowspan: cellData.rowSpan || 1,
-                    text: textDiv.innerText,
-                    style: {
-                      ...style,
-                      align: ['left', 'right', 'center'].includes(align) ? (align as 'left' | 'right' | 'center') : 'left',
-                      fontsize,
-                      fontsizePt,
-                      fontname,
-                      color,
-                      bold: cellData.fontBold,
-                      backcolor: cellData.fillColor,
-                      valign: cellLayout?.valign,
-                      margin: cellLayout?.margin,
-                      lineHeight,
+                    width: el.width,
+                    height: el.height,
+                    left: el.left,
+                    top: el.top,
+                    viewBox: [200, 200],
+                    path: 'M 0 0 L 200 0 L 200 200 L 0 200 Z',
+                    fill,
+                    gradient,
+                    pattern,
+                    fixedRatio: false,
+                    rotate: el.rotate,
+                    outline: {
+                      color: el.borderColor,
+                      width: +(el.borderWidth * ratio).toFixed(2),
+                      style: el.borderType,
                     },
-                  })
-                  textDiv = null
-                }
-                data.push(rowCells)
-              }
-  
-              const allWidth = el.colWidths.reduce((a, b) => a + b, 0)
-              const colWidths: number[] = el.colWidths.map(item => item / allWidth)
+                    text: {
+                      content: convertTextContent(el.content, ratio),
+                      defaultFontName: theme.value.fontName,
+                      defaultColor: theme.value.fontColor,
+                      align: shapeVAlignMap[el.vAlign] || 'middle',
+                    },
+                    flipH: el.isFlipH,
+                    flipV: el.isFlipV,
+                  }
+                  if (el.link) element.link = { type: 'web', target: el.link }
+                  if (metrics.lineHeight) element.text!.lineHeight = metrics.lineHeight
+                  if (metrics.margin) element.text!.paragraphSpace = metrics.margin
 
-              const firstCell = el.data[0][0]
-              const border = firstCell.borders.top ||
+                  if (el.shadow) {
+                    element.shadow = {
+                      h: el.shadow.h * ratio,
+                      v: el.shadow.v * ratio,
+                      blur: el.shadow.blur * ratio,
+                      color: el.shadow.color,
+                    }
+                  }
+    
+                  if (shape) {
+                    element.path = shape.path
+                    element.viewBox = shape.viewBox
+    
+                    if (shape.pathFormula) {
+                      element.pathFormula = shape.pathFormula
+                      element.viewBox = [el.width, el.height]
+    
+                      const pathFormula = SHAPE_PATH_FORMULAS[shape.pathFormula]
+                      if ('editable' in pathFormula && pathFormula.editable) {
+                        let keypointValues = pathFormula.defaultValue
+                        if (el.keypoints) {
+                          let keypoint = 0
+                          if (el.shapType === 'roundRect') {
+                            const val = el.keypoints.adj === undefined ? 0.334 : el.keypoints.adj
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'snip1Rect') {
+                            const val = el.keypoints.adj === undefined ? 0.334 : el.keypoints.adj
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'snip2SameRect') {
+                            const val = el.keypoints.adj1 === undefined ? 0.334 : el.keypoints.adj1
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'snip2DiagRect') {
+                            const val = el.keypoints.adj2 === undefined ? 0.334 : el.keypoints.adj2
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'snipRoundRect') {
+                            const val1 = el.keypoints.adj1 === undefined ? 0.334 : el.keypoints.adj1
+                            const val2 = el.keypoints.adj2 === undefined ? 0.334 : el.keypoints.adj2
+                            keypoint = ((val1 + val2) / 2) * 0.5
+                          }
+                          if (el.shapType === 'round1Rect') {
+                            const val = el.keypoints.adj === undefined ? 0.334 : el.keypoints.adj
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'round2SameRect') {
+                            const val = el.keypoints.adj1 === undefined ? 0.334 : el.keypoints.adj1
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'round2DiagRect') {
+                            const val = el.keypoints.adj1 === undefined ? 0.334 : el.keypoints.adj1
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'triangle') {
+                            const val = el.keypoints.adj === undefined ? 1 : el.keypoints.adj
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'trapezoid') {
+                            const val = el.keypoints.adj === undefined ? 0.5 : el.keypoints.adj
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'frame') {
+                            const val = el.keypoints.adj1 === undefined ? 0.25 : el.keypoints.adj1
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'corner') {
+                            const val1 = el.keypoints.adj1 === undefined ? 1 : el.keypoints.adj1
+                            const val2 = el.keypoints.adj2 === undefined ? 1 : el.keypoints.adj2
+                            keypoint = ((val1 + val2) / 2) * 0.5
+                          }
+                          if (el.shapType === 'diagStripe') {
+                            const val = el.keypoints.adj === undefined ? 1 : el.keypoints.adj
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'donut') {
+                            const val = el.keypoints.adj === undefined ? 0.5 : el.keypoints.adj
+                            keypoint = val * 0.5
+                          }
+                          if (el.shapType === 'plus') {
+                            const val = el.keypoints.adj === undefined ? 0.5 : el.keypoints.adj
+                            keypoint = 1 - val
+                          }
+                          if (pathFormula.range && keypoint < pathFormula.range[0][0]) keypoint = pathFormula.range[0][0]
+                          if (pathFormula.range && keypoint > pathFormula.range[0][1]) keypoint = pathFormula.range[0][1]
+                          keypointValues = [keypoint]
+                        }
+                        element.path = pathFormula.formula(el.width, el.height, keypointValues)
+                        element.keypoints = keypointValues
+                      }
+                      else element.path = pathFormula.formula(el.width, el.height)
+                    }
+                  }
+                  else if (el.path && el.path.indexOf('NaN') === -1) {
+                    const { maxX, maxY } = getSvgPathRange(el.path)
+                    element.path = el.path
+                    if ((maxX / maxY) > (originWidth / originHeight)) {
+                      element.viewBox = [maxX, maxX * originHeight / originWidth]
+                    }
+                    else {
+                      element.viewBox = [maxY * originWidth / originHeight, maxY]
+                    }
+                  }
+                  if (el.shapType === 'custom') {
+                    if (el.path!.indexOf('NaN') !== -1) {
+                      if (element.width === 0) element.width = 0.1
+                      if (element.height === 0) element.height = 0.1
+                      element.path = el.path!.replace(/NaN/g, '0')
+                    }
+                    else {
+                      element.path = el.path!
+                    }
+                    const { maxX, maxY } = getSvgPathRange(element.path)
+                    if ((maxX / maxY) > (originWidth / originHeight)) {
+                      element.viewBox = [maxX, maxX * originHeight / originWidth]
+                    }
+                    else {
+                      element.viewBox = [maxY * originWidth / originHeight, maxY]
+                    }
+                  }
+    
+                  if (element.path && element.viewBox[0] && element.viewBox[1]) slide.elements.push(element)
+                }
+              }
+              else if (el.type === 'table') {
+                const row = el.data.length
+                const col = el.data[0].length
+                const tableCellLayout = tableLayoutMap[slideIndex]?.[slideTableIndex] || []
+                slideTableIndex++
+  
+                const style: TableCellStyle = {
+                  fontname: theme.value.fontName,
+                  color: theme.value.fontColor,
+                }
+                const data: TableCell[][] = []
+                for (let i = 0; i < row; i++) {
+                  const rowCells: TableCell[] = []
+                  for (let j = 0; j < col; j++) {
+                    const cellData = el.data[i][j]
+                    const cellLayout = tableCellLayout[i]?.[j]
+
+                    let textDiv: HTMLDivElement | null = document.createElement('div')
+                    textDiv.innerHTML = cellData.text
+                    const p = textDiv.querySelector('p')
+                    const align = p?.style.textAlign || 'left'
+                    const lineHeightText = p?.style.lineHeight || ''
+                    const lineHeight = lineHeightText ? parseFloat(lineHeightText) : undefined
+
+                    const span = textDiv.querySelector('span')
+                    const fontsize = span?.style.fontSize ? (parseInt(span?.style.fontSize) * ratio).toFixed(1) + 'px' : ''
+                    const fontsizePt = span?.style.fontSize ? parseFloat(span.style.fontSize) : undefined
+                    const fontname = span?.style.fontFamily || ''
+                    const color = span?.style.color || cellData.fontColor
+
+                    rowCells.push({
+                      id: nanoid(10),
+                      colspan: cellData.colSpan || 1,
+                      rowspan: cellData.rowSpan || 1,
+                      text: textDiv.innerText,
+                      style: {
+                        ...style,
+                        align: ['left', 'right', 'center'].includes(align) ? (align as 'left' | 'right' | 'center') : 'left',
+                        fontsize,
+                        fontsizePt,
+                        fontname,
+                        color,
+                        bold: cellData.fontBold,
+                        backcolor: cellData.fillColor,
+                        valign: cellLayout?.valign,
+                        margin: cellLayout?.margin,
+                        lineHeight,
+                      },
+                    })
+                    textDiv = null
+                  }
+                  data.push(rowCells)
+                }
+  
+                const allWidth = el.colWidths.reduce((a, b) => a + b, 0)
+                const colWidths: number[] = el.colWidths.map(item => item / allWidth)
+
+                const firstCell = el.data[0][0]
+                const border = firstCell.borders.top ||
                 firstCell.borders.bottom ||
                 el.borders.top ||
                 el.borders.bottom ||
@@ -960,176 +993,185 @@ export default () => {
                 firstCell.borders.right ||
                 el.borders.left ||
                 el.borders.right
-              const borderWidth = border?.borderWidth || 0
-              const borderStyle = border?.borderType || 'solid'
-              const borderColor = border?.borderColor || '#eeece1'
+                const borderWidth = border?.borderWidth || 0
+                const borderStyle = border?.borderType || 'solid'
+                const borderColor = border?.borderColor || '#eeece1'
   
-              slide.elements.push({
-                type: 'table',
-                id: nanoid(10),
-                width: el.width,
-                height: el.height,
-                left: el.left,
-                top: el.top,
-                colWidths,
-                rotate: 0,
-                data,
-                outline: {
-                  width: +(borderWidth * ratio || 2).toFixed(2),
-                  style: borderStyle,
-                  color: borderColor,
-                },
-                cellMinHeight: el.rowHeights[0] ? el.rowHeights[0] * ratio : 36,
-                rowHeights: el.rowHeights.map(item => item * ratio),
-              })
-            }
-            else if (el.type === 'chart') {
-              let labels: string[]
-              let legends: string[]
-              let series: number[][]
-  
-              if (el.chartType === 'scatterChart' || el.chartType === 'bubbleChart') {
-                labels = el.data[0].map((item, index) => `坐标${index + 1}`)
-                legends = ['X', 'Y']
-                series = el.data
+                slide.elements.push({
+                  type: 'table',
+                  id: nanoid(10),
+                  width: el.width,
+                  height: el.height,
+                  left: el.left,
+                  top: el.top,
+                  colWidths,
+                  rotate: 0,
+                  data,
+                  outline: {
+                    width: +(borderWidth * ratio || 2).toFixed(2),
+                    style: borderStyle,
+                    color: borderColor,
+                  },
+                  cellMinHeight: el.rowHeights[0] ? el.rowHeights[0] * ratio : 36,
+                  rowHeights: el.rowHeights.map(item => item * ratio),
+                })
               }
-              else {
-                const data = el.data as ChartItem[]
-                labels = Object.values(data[0].xlabels)
-                legends = data.map(item => item.key)
-                series = data.map(item => item.values.map(v => v.y))
-              }
-
-              const options: ChartOptions = {}
+              else if (el.type === 'chart') {
+                let labels: string[]
+                let legends: string[]
+                let series: number[][]
   
-              let chartType: ChartType = 'bar'
-
-              switch (el.chartType) {
-                case 'barChart':
-                case 'bar3DChart':
-                  chartType = 'bar'
-                  if (el.barDir === 'bar') chartType = 'column'
-                  if (el.grouping === 'stacked' || el.grouping === 'percentStacked') options.stack = true
-                  break
-                case 'lineChart':
-                case 'line3DChart':
-                  if (el.grouping === 'stacked' || el.grouping === 'percentStacked') options.stack = true
-                  chartType = 'line'
-                  break
-                case 'areaChart':
-                case 'area3DChart':
-                  if (el.grouping === 'stacked' || el.grouping === 'percentStacked') options.stack = true
-                  chartType = 'area'
-                  break
-                case 'scatterChart':
-                case 'bubbleChart':
-                  chartType = 'scatter'
-                  break
-                case 'pieChart':
-                case 'pie3DChart':
-                  chartType = 'pie'
-                  break
-                case 'radarChart':
-                  chartType = 'radar'
-                  break
-                case 'doughnutChart':
-                  chartType = 'ring'
-                  break
-                default:
-              }
-  
-              slide.elements.push({
-                type: 'chart',
-                id: nanoid(10),
-                chartType: chartType,
-                width: el.width,
-                height: el.height,
-                left: el.left,
-                top: el.top,
-                rotate: 0,
-                themeColors: el.colors.length ? el.colors : theme.value.themeColors,
-                textColor: theme.value.fontColor,
-                data: {
-                  labels,
-                  legends,
-                  series,
-                },
-                options,
-              })
-            }
-            else if (el.type === 'group') {
-              let elements: BaseElement[] = el.elements.map(_el => {
-                let left = _el.left + originLeft
-                let top = _el.top + originTop
-
-                let rotate = 0
-                if ('rotate' in _el) rotate = _el.rotate
-
-                if (el.rotate) {
-                  const { x, y, globalRotation } = calculateRotatedPosition(
-                    originLeft,
-                    originTop,
-                    originWidth,
-                    originHeight,
-                    _el.left,
-                    _el.top,
-                    _el.width,
-                    _el.height,
-                    el.rotate,
-                    rotate
-                  )
-                  left = x
-                  top = y
-                  rotate = globalRotation
+                if (el.chartType === 'scatterChart' || el.chartType === 'bubbleChart') {
+                  labels = el.data[0].map((item, index) => `坐标${index + 1}`)
+                  legends = ['X', 'Y']
+                  series = el.data
+                }
+                else {
+                  const data = el.data as ChartItem[]
+                  labels = Object.values(data[0].xlabels)
+                  legends = data.map(item => item.key)
+                  series = data.map(item => item.values.map(v => v.y))
                 }
 
-                const element = {
+                const options: ChartOptions = {}
+  
+                let chartType: ChartType = 'bar'
+
+                switch (el.chartType) {
+                  case 'barChart':
+                  case 'bar3DChart':
+                    chartType = 'bar'
+                    if (el.barDir === 'bar') chartType = 'column'
+                    if (el.grouping === 'stacked' || el.grouping === 'percentStacked') options.stack = true
+                    break
+                  case 'lineChart':
+                  case 'line3DChart':
+                    if (el.grouping === 'stacked' || el.grouping === 'percentStacked') options.stack = true
+                    chartType = 'line'
+                    break
+                  case 'areaChart':
+                  case 'area3DChart':
+                    if (el.grouping === 'stacked' || el.grouping === 'percentStacked') options.stack = true
+                    chartType = 'area'
+                    break
+                  case 'scatterChart':
+                  case 'bubbleChart':
+                    chartType = 'scatter'
+                    break
+                  case 'pieChart':
+                  case 'pie3DChart':
+                    chartType = 'pie'
+                    break
+                  case 'radarChart':
+                    chartType = 'radar'
+                    break
+                  case 'doughnutChart':
+                    chartType = 'ring'
+                    break
+                  default:
+                }
+  
+                slide.elements.push({
+                  type: 'chart',
+                  id: nanoid(10),
+                  chartType: chartType,
+                  width: el.width,
+                  height: el.height,
+                  left: el.left,
+                  top: el.top,
+                  rotate: 0,
+                  themeColors: el.colors.length ? el.colors : theme.value.themeColors,
+                  textColor: theme.value.fontColor,
+                  data: {
+                    labels,
+                    legends,
+                    series,
+                  },
+                  options,
+                })
+              }
+              else if (el.type === 'group') {
+                let elements: BaseElement[] = el.elements.map(_el => {
+                  let left = _el.left + originLeft
+                  let top = _el.top + originTop
+
+                  let rotate = 0
+                  if ('rotate' in _el) rotate = _el.rotate
+
+                  if (el.rotate) {
+                    const { x, y, globalRotation } = calculateRotatedPosition(
+                      originLeft,
+                      originTop,
+                      originWidth,
+                      originHeight,
+                      _el.left,
+                      _el.top,
+                      _el.width,
+                      _el.height,
+                      el.rotate,
+                      rotate
+                    )
+                    left = x
+                    top = y
+                    rotate = globalRotation
+                  }
+
+                  const element = {
+                    ..._el,
+                    left,
+                    top,
+                  }
+                  if (el.isFlipH && 'isFlipH' in element) element.isFlipH = true
+                  if (el.isFlipV && 'isFlipV' in element) element.isFlipV = true
+                  if ('rotate' in element && el.rotate) element.rotate = rotate
+
+                  return element
+                })
+                if (el.isFlipH) elements = flipGroupElements(elements, 'y')
+                if (el.isFlipV) elements = flipGroupElements(elements, 'x')
+                parseElements(elements)
+              }
+              else if (el.type === 'diagram') {
+                const elements = el.elements.map(_el => ({
                   ..._el,
-                  left,
-                  top,
-                }
-                if (el.isFlipH && 'isFlipH' in element) element.isFlipH = true
-                if (el.isFlipV && 'isFlipV' in element) element.isFlipV = true
-                if ('rotate' in element && el.rotate) element.rotate = rotate
-
-                return element
-              })
-              if (el.isFlipH) elements = flipGroupElements(elements, 'y')
-              if (el.isFlipV) elements = flipGroupElements(elements, 'x')
-              parseElements(elements)
-            }
-            else if (el.type === 'diagram') {
-              const elements = el.elements.map(_el => ({
-                ..._el,
-                left: _el.left + originLeft,
-                top: _el.top + originTop,
-              }))
-              parseElements(elements)
+                  left: _el.left + originLeft,
+                  top: _el.top + originTop,
+                }))
+                parseElements(elements)
+              }
             }
           }
+          parseElements([...item.elements, ...item.layoutElements])
+          slides.push(slide)
         }
-        parseElements([...item.elements, ...item.layoutElements])
-        slides.push(slide)
+
+        if (cover) {
+          slidesStore.updateSlideIndex(0)
+          slidesStore.setSlides(slides)
+          if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
+          slidesStore.setSourceSlideSize({ width, height })
+          if (addSnapshot) addHistorySnapshot()
+        }
+        else if (isEmptySlide.value) {
+          slidesStore.setSlides(slides)
+          if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
+          slidesStore.setSourceSlideSize({ width, height })
+          if (addSnapshot) addHistorySnapshot()
+        }
+        else addSlidesFromData(slides)
+
+        exporting.value = false
+        resolve()
       }
 
-      if (cover) {
-        slidesStore.updateSlideIndex(0)
-        slidesStore.setSlides(slides)
-        if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
-        slidesStore.setSourceSlideSize({ width, height })
-        addHistorySnapshot()
+      reader.onerror = () => {
+        exporting.value = false
+        message.error('无法正确读取 / 解析该文件')
+        reject(new Error('无法正确读取 / 解析该文件'))
       }
-      else if (isEmptySlide.value) {
-        slidesStore.setSlides(slides)
-        if (aspectRatio !== viewportRatio.value) slidesStore.setViewportRatio(aspectRatio)
-        slidesStore.setSourceSlideSize({ width, height })
-        addHistorySnapshot()
-      }
-      else addSlidesFromData(slides)
 
-      exporting.value = false
-    }
-    reader.readAsArrayBuffer(file)
+      reader.readAsArrayBuffer(file)
+    })
   }
 
   return {

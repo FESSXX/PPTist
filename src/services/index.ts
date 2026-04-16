@@ -3,6 +3,7 @@ import fetchRequest from './fetch'
 
 // export const SERVER_URL = 'http://localhost:5000'
 export const SERVER_URL = (import.meta.env.MODE === 'development') ? '/api' : 'https://server.pptist.cn'
+export const PREVIEW_FILE_URL = import.meta.env.VITE_PPT_PREVIEW_API_BASE || '/zj_ppt/api/v2'
 
 interface ImageSearchPayload {
   query: string;
@@ -36,6 +37,13 @@ interface AIWritingPayload {
 export default {
   getMockData(filename: string): Promise<any> {
     return axios.get(`./mocks/${filename}.json`)
+  },
+
+  getPPTFileByName(name: string): Promise<Blob> {
+    return axios.get(`${PREVIEW_FILE_URL}/FileByName`, {
+      params: { name },
+      responseType: 'blob',
+    })
   },
 
   searchImage(body: ImageSearchPayload): Promise<any> {

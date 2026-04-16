@@ -96,27 +96,6 @@
       <Button style="flex: 1;" @click="applyBackgroundAllSlide()"><i-icon-park-outline:check /> 应用背景到全部</Button>
     </div>
 
-    <Divider />
-
-    <div class="row">
-      <Select 
-        style="width: 100%;" 
-        :value="viewportRatio" 
-        @update:value="value => updateViewportRatio(value as number)"
-        :options="[
-          { label: '宽屏 16 : 9', value: 0.5625 },
-          { label: '宽屏 16 : 10', value: 0.625 },
-          { label: '标准 4 : 3', value: 0.75 },
-          { label: '纸张 A3 / A4', value: 0.70710678 },
-          { label: '竖向 A3 / A4', value: 1.41421356 },
-        ]"
-      />
-    </div>
-
-    <div class="row">
-      <div class="canvas-size">画布尺寸：{{  viewportSize  }} × {{ toFixed(viewportSize * viewportRatio) }}</div>
-    </div>
-
     <!-- 演示场景隐藏全局主题与预置主题区域 -->
   </div>
 </template>
@@ -139,7 +118,6 @@ import { getImageDataURL } from '@/utils/image'
 import ColorButton from '@/components/ColorButton.vue'
 import FileInput from '@/components/FileInput.vue'
 import ColorPicker from '@/components/ColorPicker/index.vue'
-import Divider from '@/components/Divider.vue'
 import Slider from '@/components/Slider.vue'
 import Button from '@/components/Button.vue'
 import Select from '@/components/Select.vue'
@@ -147,7 +125,7 @@ import Popover from '@/components/Popover.vue'
 import GradientBar from '@/components/GradientBar.vue'
 
 const slidesStore = useSlidesStore()
-const { slides, currentSlide, slideIndex, viewportRatio, viewportSize } = storeToRefs(slidesStore)
+const { slides, currentSlide, slideIndex } = storeToRefs(slidesStore)
 
 const currentGradientIndex = ref(0)
 
@@ -249,17 +227,6 @@ const applyBackgroundAllSlide = () => {
   addHistorySnapshot()
 }
 
-// 设置画布尺寸（宽高比例）
-const updateViewportRatio = (value: number) => {
-  slidesStore.setViewportRatio(value)
-}
-
-const toFixed = (num: number) => {
-  if (num % 1 !== 0) {
-    return parseFloat(num.toFixed(1))
-  } 
-  return Math.floor(num)
-}
 </script>
 
 <style lang="scss" scoped>
@@ -314,11 +281,4 @@ const toFixed = (num: number) => {
     cursor: pointer;
   }
 }
-.canvas-size {
-  width: 100%;
-  color: #888;
-  font-size: 12px;
-  text-align: center;
-}
-
 </style>

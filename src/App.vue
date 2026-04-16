@@ -15,6 +15,8 @@ import { useScreenStore, useMainStore, useSnapshotStore, useSlidesStore } from '
 import { LOCALSTORAGE_KEY_DISCARDED_DB } from '@/configs/storage'
 import { deleteDiscardedDB } from '@/utils/database'
 import { isPC } from '@/utils/common'
+import useImport from '@/hooks/useImport'
+import message from '@/utils/message'
 import api from '@/services'
 
 import Editor from './views/Editor/index.vue'
@@ -31,28 +33,58 @@ const screenStore = useScreenStore()
 const { databaseId } = storeToRefs(mainStore)
 const { slides } = storeToRefs(slidesStore)
 const { screening } = storeToRefs(screenStore)
+const { importPPTXFile } = useImport()
 
-const isAudienceMode = new URLSearchParams(window.location.search).get('mode') === 'audience'
+const searchParams = new URLSearchParams(window.location.search)
+const isAudienceMode = searchParams.get('mode') === 'audience'
+const remoteFileName = searchParams.get('fileName')?.trim()
 
 if (import.meta.env.MODE !== 'development') {
   window.onbeforeunload = () => false
 }
 
+const createEmptySlide = () => ({
+  id: nanoid(10),
+  elements: [],
+  background: {
+    type: 'solid' as const,
+    color: slidesStore.theme.backgroundColor,
+  },
+})
+
+const initializeBlankDeck = async () => {
+  slidesStore.setSlides([createEmptySlide()])
+  if (!isAudienceMode) await snapshotStore.initSnapshotDatabase()
+}
+
+const loadRemoteDeck = async (fileName: string) => {
+  const blob = await api.getPPTFileByName(fileName)
+  const file = new File([blob], 'remote-preview.pptx', {
+    type: blob.type || 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    lastModified: Date.now(),
+  })
+
+  await importPPTXFile([file], { cover: true, addSnapshot: false })
+  if (!isAudienceMode) await snapshotStore.initSnapshotDatabase()
+}
+
 onMounted(async () => {
-  if (isAudienceMode) {
-    slidesStore.setSlides([{
-      id: nanoid(10),
-      elements: [],
-    }])
-    screenStore.setScreening(true)
+  await deleteDiscardedDB()
+
+  if (remoteFileName) {
+    try {
+      await loadRemoteDeck(remoteFileName)
+    }
+    catch {
+      message.warning('远程演示文稿加载失败，已打开空白演示文稿')
+      await initializeBlankDeck()
+    }
   }
   else {
-    const slides = await api.getMockData('slides')
-    slidesStore.setSlides(slides)
-
-    await deleteDiscardedDB()
-    snapshotStore.initSnapshotDatabase()
+    await initializeBlankDeck()
   }
+
+  if (isAudienceMode) screenStore.setScreening(true)
 })
 
 // 应用注销时向 localStorage 中记录下本次 indexedDB 的数据库ID，用于之后清除数据库
