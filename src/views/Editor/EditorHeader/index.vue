@@ -89,6 +89,7 @@
           <div class="arrow-btn"><i-icon-park-outline:down class="arrow" /></div>
         </Popover>
       </div>
+      <!--
       <Popover trigger="click" placement="bottom" v-model:value="importMenuVisible">
         <template #content>
           <div class="import-popover">
@@ -127,6 +128,7 @@
           <i-icon-park-outline:upload class="icon" />
         </div>
       </Popover>
+      -->
       <div class="menu-item" v-tooltip="'导出'" @click="setDialogForExport('pptx')">
         <i-icon-park-outline:download class="icon" />
       </div>
@@ -181,7 +183,6 @@ const { importSpecificFile, importPPTXFile, importJSON, exporting } = useImport(
 const { resetSlides } = useSlideHandler()
 
 const mainMenuVisible = ref(false)
-const importMenuVisible = ref(false)
 const hotkeyDrawerVisible = ref(false)
 const editingTitle = ref(false)
 const titleValue = ref('')
